@@ -22,6 +22,8 @@ remains; with exactly one boat, `M` toggles a small fishing mode from that boat.
 Interactive runs also start a quiet Strudel-generated aquarium ambience loop
 through `ffplay` when available.
 
+![Kilix Fishtank shark turn](images/readme-shark-turn.png)
+
 ## Build
 
 ```sh
