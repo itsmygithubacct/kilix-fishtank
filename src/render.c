@@ -1,7 +1,7 @@
-/* Software renderer: draws an RGBA framebuffer for the Kitty presenter. */
+/* Game-specific drawing over the shared software rasterizer. */
 #include "fishtank.h"
-#include "font8x16.h"
 #include "embedded_assets.h"
+#include "soft_raster.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,8 +12,9 @@
 #define FISH_TURN_FRAMES 5
 #define SHARK_TURN_FRAMES 7
 
-static uint8_t *fb = NULL;
-static uint8_t *backdrop = NULL;
+static sr_canvas canvas;
+static uint8_t *fb = NULL;       /* repacked R,G,B,A presenter buffer */
+static uint32_t *backdrop = NULL;
 static int W = 0, H = 0;
 static int backdropVersion = -1;
 
@@ -51,27 +52,10 @@ static void build_backdrop(void);
 uint8_t *render_fb(void) { return fb; }
 
 static uint32_t mix_rgb(uint32_t a, uint32_t b, float t)
-{
-    t = clampf(t, 0.0f, 1.0f);
-    int ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-    int br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
-    int r = ar + (int)((br - ar) * t);
-    int g = ag + (int)((bg - ag) * t);
-    int bl = ab + (int)((bb - ab) * t);
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
-}
+{ return sr_mix(a, b, t); }
 
 static uint32_t scale_rgb(uint32_t rgb, float k)
-{
-    k = clampf(k, 0.0f, 2.0f);
-    int r = (int)(((rgb >> 16) & 255) * k);
-    int g = (int)(((rgb >> 8) & 255) * k);
-    int b = (int)((rgb & 255) * k);
-    if (r > 255) r = 255;
-    if (g > 255) g = 255;
-    if (b > 255) b = 255;
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-}
+{ return sr_scale_rgb(rgb, k); }
 
 static float hash01(uint32_t x)
 {
@@ -87,8 +71,9 @@ void render_init(int w, int h)
 {
     W = w;
     H = h;
+    (void)sr_canvas_init(&canvas, W, H);
     fb = malloc((size_t)W * H * 4);
-    backdrop = malloc((size_t)W * H * 4);
+    backdrop = malloc((size_t)W * H * sizeof *backdrop);
     backdropVersion = -1;
     build_sprites();
 }
@@ -96,6 +81,7 @@ void render_init(int w, int h)
 void render_shutdown(void)
 {
     free_sprites();
+    sr_canvas_free(&canvas);
     free(fb);
     free(backdrop);
     fb = NULL;
@@ -104,130 +90,61 @@ void render_shutdown(void)
 
 static inline void set_px(int x, int y, uint32_t rgb)
 {
-    if (x < 0 || x >= W || y < 0 || y >= H) return;
-    uint8_t *p = fb + ((size_t)y * W + x) * 4;
-    p[0] = (rgb >> 16) & 255;
-    p[1] = (rgb >> 8) & 255;
-    p[2] = rgb & 255;
-    p[3] = 255;
+    sr_px(&canvas, x, y, rgb);
 }
 
 static inline void px_blend(int x, int y, uint32_t rgb, float a)
 {
-    if (x < 0 || x >= W || y < 0 || y >= H) return;
-    int ai = (int)(clampf(a, 0.0f, 1.0f) * 256.0f + 0.5f);
-    if (ai <= 0) return;
-    uint8_t *p = fb + ((size_t)y * W + x) * 4;
-    int r = (rgb >> 16) & 255;
-    int g = (rgb >> 8) & 255;
-    int b = rgb & 255;
-    p[0] = (uint8_t)(p[0] + (((r - p[0]) * ai) >> 8));
-    p[1] = (uint8_t)(p[1] + (((g - p[1]) * ai) >> 8));
-    p[2] = (uint8_t)(p[2] + (((b - p[2]) * ai) >> 8));
+    sr_blend(&canvas, x, y, rgb, a);
 }
 
-static void fill_rect(float fx, float fy, float fw, float fh, uint32_t rgb, float a)
+/* Sprite assets remain in their generated premultiplied RGBA form.  These
+ * two game-specific compositors bridge them into soft-raster's canvas. */
+static inline void blend_sprite_pixel(int x, int y, const uint8_t *src,
+                                      int globalAlpha, int sourceAlpha)
 {
-    if (fw <= 0.0f || fh <= 0.0f) return;
-    int x0 = (int)floorf(fx), x1 = (int)ceilf(fx + fw);
-    int y0 = (int)floorf(fy), y1 = (int)ceilf(fy + fh);
-    for (int y = y0; y < y1; y++) {
-        float cy = fminf((float)(y + 1), fy + fh) - fmaxf((float)y, fy);
-        if (cy <= 0.0f) continue;
-        if (cy > 1.0f) cy = 1.0f;
-        for (int x = x0; x < x1; x++) {
-            float cx = fminf((float)(x + 1), fx + fw) - fmaxf((float)x, fx);
-            if (cx <= 0.0f) continue;
-            if (cx > 1.0f) cx = 1.0f;
-            px_blend(x, y, rgb, a * cx * cy);
-        }
-    }
+    uint32_t *pixel = &canvas.px[(size_t)y * W + x];
+    int inv = 255 - sourceAlpha;
+    int dr = (*pixel >> 16) & 255;
+    int dg = (*pixel >> 8) & 255;
+    int db = *pixel & 255;
+    int r = src[0] * globalAlpha / 255 + dr * inv / 255;
+    int g = src[1] * globalAlpha / 255 + dg * inv / 255;
+    int b = src[2] * globalAlpha / 255 + db * inv / 255;
+    *pixel = 0xff000000u | (uint32_t)r << 16 | (uint32_t)g << 8 |
+             (uint32_t)b;
 }
+
+static inline void blend_tint_pixel(int x, int y, int r, int g, int b,
+                                    int sourceAlpha)
+{
+    uint32_t *pixel = &canvas.px[(size_t)y * W + x];
+    int inv = 255 - sourceAlpha;
+    int dr = (*pixel >> 16) & 255;
+    int dg = (*pixel >> 8) & 255;
+    int db = *pixel & 255;
+    *pixel = 0xff000000u |
+             (uint32_t)((r * sourceAlpha + dr * inv) / 255) << 16 |
+             (uint32_t)((g * sourceAlpha + dg * inv) / 255) << 8 |
+             (uint32_t)((b * sourceAlpha + db * inv) / 255);
+}
+
+static void fill_rect(float x, float y, float w, float h, uint32_t rgb, float a)
+{ sr_fill_rect(&canvas, x, y, w, h, rgb, a); }
 
 static void stroke_rect(float x, float y, float w, float h,
                         float line, uint32_t rgb, float a)
-{
-    fill_rect(x, y, w, line, rgb, a);
-    fill_rect(x, y + h - line, w, line, rgb, a);
-    fill_rect(x, y, line, h, rgb, a);
-    fill_rect(x + w - line, y, line, h, rgb, a);
-}
+{ sr_stroke_rect(&canvas, x, y, w, h, line, rgb, a); }
 
 static void fill_circle(float cx, float cy, float r, uint32_t rgb, float a)
-{
-    if (r <= 0.0f) return;
-    float rOut = r + 0.5f;
-    float rIn = r - 0.5f;
-    float rOut2 = rOut * rOut;
-    float rIn2 = rIn > 0.0f ? rIn * rIn : 0.0f;
-    int y0 = (int)floorf(cy - rOut), y1 = (int)ceilf(cy + rOut);
-    for (int y = y0; y <= y1; y++) {
-        float dy = y + 0.5f - cy;
-        float w2 = rOut2 - dy * dy;
-        if (w2 <= 0.0f) continue;
-        float half = sqrtf(w2);
-        int x0 = (int)floorf(cx - half), x1 = (int)ceilf(cx + half);
-        for (int x = x0; x <= x1; x++) {
-            float dx = x + 0.5f - cx;
-            float d2 = dx * dx + dy * dy;
-            if (d2 >= rOut2) continue;
-            if (d2 <= rIn2) {
-                px_blend(x, y, rgb, a);
-            } else {
-                float cov = rOut - sqrtf(d2);
-                px_blend(x, y, rgb, a * clampf(cov, 0.0f, 1.0f));
-            }
-        }
-    }
-}
+{ sr_fill_circle(&canvas, cx, cy, r, rgb, a); }
 
 static void ring(float cx, float cy, float r, float width, uint32_t rgb, float a)
-{
-    float hw = fmaxf(0.45f, width * 0.5f);
-    int x0 = (int)floorf(cx - r - hw) - 1;
-    int x1 = (int)ceilf(cx + r + hw) + 1;
-    int y0 = (int)floorf(cy - r - hw) - 1;
-    int y1 = (int)ceilf(cy + r + hw) + 1;
-    for (int y = y0; y < y1; y++) {
-        for (int x = x0; x < x1; x++) {
-            float dx = x + 0.5f - cx;
-            float dy = y + 0.5f - cy;
-            float d = sqrtf(dx * dx + dy * dy);
-            float cov = hw + 0.5f - fabsf(d - r);
-            if (cov > 0.0f)
-                px_blend(x, y, rgb, a * clampf(cov, 0.0f, 1.0f));
-        }
-    }
-}
+{ sr_ring(&canvas, cx, cy, r, width, rgb, a); }
 
 static void draw_line(float x0, float y0, float x1, float y1,
                       float width, uint32_t rgb, float a)
-{
-    float dx = x1 - x0, dy = y1 - y0;
-    float len2 = dx * dx + dy * dy;
-    if (len2 < 0.1f) {
-        fill_circle(x0, y0, width * 0.5f, rgb, a);
-        return;
-    }
-    float hw = fmaxf(0.5f, width * 0.5f);
-    int xMin = (int)floorf(fminf(x0, x1) - hw) - 1;
-    int xMax = (int)ceilf(fmaxf(x0, x1) + hw) + 1;
-    int yMin = (int)floorf(fminf(y0, y1) - hw) - 1;
-    int yMax = (int)ceilf(fmaxf(y0, y1) + hw) + 1;
-    for (int y = yMin; y < yMax; y++) {
-        for (int x = xMin; x < xMax; x++) {
-            float px = x + 0.5f - x0;
-            float py = y + 0.5f - y0;
-            float t = clampf((px * dx + py * dy) / len2, 0.0f, 1.0f);
-            float qx = px - t * dx;
-            float qy = py - t * dy;
-            float cov = hw + 0.5f - sqrtf(qx * qx + qy * qy);
-            if (cov > 0.0f)
-                px_blend(x, y, rgb, a * clampf(cov, 0.0f, 1.0f));
-        }
-    }
-}
-
+{ sr_line(&canvas, x0, y0, x1, y1, width, rgb, a, 0, 0); }
 static void fill_ellipse(float cx, float cy, float rx, float ry, uint32_t rgb, float a)
 {
     if (rx <= 0.0f || ry <= 0.0f) return;
@@ -246,32 +163,9 @@ static void fill_ellipse(float cx, float cy, float rx, float ry, uint32_t rgb, f
     }
 }
 
-static float edge_fn(float ax, float ay, float bx, float by, float px, float py)
-{
-    return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
-}
-
 static void fill_triangle(float x0, float y0, float x1, float y1,
                           float x2, float y2, uint32_t rgb, float a)
-{
-    int minX = (int)floorf(fminf(x0, fminf(x1, x2))) - 1;
-    int maxX = (int)ceilf(fmaxf(x0, fmaxf(x1, x2))) + 1;
-    int minY = (int)floorf(fminf(y0, fminf(y1, y2))) - 1;
-    int maxY = (int)ceilf(fmaxf(y0, fmaxf(y1, y2))) + 1;
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            float px = x + 0.5f;
-            float py = y + 0.5f;
-            float e0 = edge_fn(x0, y0, x1, y1, px, py);
-            float e1 = edge_fn(x1, y1, x2, y2, px, py);
-            float e2 = edge_fn(x2, y2, x0, y0, px, py);
-            bool neg = e0 < 0.0f || e1 < 0.0f || e2 < 0.0f;
-            bool pos = e0 > 0.0f || e1 > 0.0f || e2 > 0.0f;
-            if (!(neg && pos))
-                px_blend(x, y, rgb, a);
-        }
-    }
-}
+{ sr_fill_triangle(&canvas, x0, y0, x1, y1, x2, y2, rgb, a); }
 
 static void sprite_alloc(Sprite *sp, int w, int h, int cx, int cy)
 {
@@ -336,6 +230,12 @@ static void spr_fill_circle(Sprite *sp, float cx, float cy, float r, uint32_t rg
     }
 }
 
+static float spr_edge_fn(float ax, float ay, float bx, float by,
+                         float px, float py)
+{
+    return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+}
+
 static void spr_triangle(Sprite *sp, float x0, float y0, float x1, float y1,
                          float x2, float y2, uint32_t rgb, float a)
 {
@@ -347,9 +247,9 @@ static void spr_triangle(Sprite *sp, float x0, float y0, float x1, float y1,
         for (int x = minX; x <= maxX; x++) {
             float px = x + 0.5f;
             float py = y + 0.5f;
-            float e0 = edge_fn(x0, y0, x1, y1, px, py);
-            float e1 = edge_fn(x1, y1, x2, y2, px, py);
-            float e2 = edge_fn(x2, y2, x0, y0, px, py);
+            float e0 = spr_edge_fn(x0, y0, x1, y1, px, py);
+            float e1 = spr_edge_fn(x1, y1, x2, y2, px, py);
+            float e2 = spr_edge_fn(x2, y2, x0, y0, px, py);
             bool neg = e0 < 0.0f || e1 < 0.0f || e2 < 0.0f;
             bool pos = e0 > 0.0f || e1 > 0.0f || e2 > 0.0f;
             if (!(neg && pos))
@@ -422,11 +322,7 @@ static void blit_sprite(const Sprite *sp, float cx, float cy, bool flip, float a
             const uint8_t *src = sp->px + ((size_t)y * sp->w + sx) * 4;
             int sa = (src[3] * ga) / 255;
             if (sa <= 0) continue;
-            int inv = 255 - sa;
-            uint8_t *dst = fb + ((size_t)dy * W + dx) * 4;
-            dst[0] = (uint8_t)((src[0] * ga / 255) + (dst[0] * inv) / 255);
-            dst[1] = (uint8_t)((src[1] * ga / 255) + (dst[1] * inv) / 255);
-            dst[2] = (uint8_t)((src[2] * ga / 255) + (dst[2] * inv) / 255);
+            blend_sprite_pixel(dx, dy, src, ga, sa);
         }
     }
 }
@@ -460,11 +356,7 @@ static void blit_sprite_tint(const Sprite *sp, float cx, float cy, bool flip,
                     int fade = radius > 0 ? 255 - (int)(sqrtf((float)(ox * ox + oy * oy)) * 110.0f) : 255;
                     if (fade <= 0) continue;
                     int sa = (baseA * fade) / 255;
-                    int inv = 255 - sa;
-                    uint8_t *dst = fb + ((size_t)yy * W + xx) * 4;
-                    dst[0] = (uint8_t)((tr * sa + dst[0] * inv) / 255);
-                    dst[1] = (uint8_t)((tg * sa + dst[1] * inv) / 255);
-                    dst[2] = (uint8_t)((tb * sa + dst[2] * inv) / 255);
+                    blend_tint_pixel(xx, yy, tr, tg, tb, sa);
                 }
             }
         }
@@ -494,11 +386,7 @@ static void blit_sprite_scaled(const Sprite *sp, float cx, float cy, bool flip,
             const uint8_t *src = sp->px + ((size_t)sy * sp->w + sx) * 4;
             int sa = (src[3] * ga) / 255;
             if (sa <= 0) continue;
-            int inv = 255 - sa;
-            uint8_t *dst = fb + ((size_t)dy * W + dx) * 4;
-            dst[0] = (uint8_t)((src[0] * ga / 255) + (dst[0] * inv) / 255);
-            dst[1] = (uint8_t)((src[1] * ga / 255) + (dst[1] * inv) / 255);
-            dst[2] = (uint8_t)((src[2] * ga / 255) + (dst[2] * inv) / 255);
+            blend_sprite_pixel(dx, dy, src, ga, sa);
         }
     }
 }
@@ -539,11 +427,7 @@ static void blit_sprite_tint_scaled(const Sprite *sp, float cx, float cy, bool f
                     int fade = radius > 0 ? 255 - (int)(sqrtf((float)(ox * ox + oy * oy)) * 110.0f) : 255;
                     if (fade <= 0) continue;
                     int sa = (baseA * fade) / 255;
-                    int inv = 255 - sa;
-                    uint8_t *dst = fb + ((size_t)yy * W + xx) * 4;
-                    dst[0] = (uint8_t)((tr * sa + dst[0] * inv) / 255);
-                    dst[1] = (uint8_t)((tg * sa + dst[1] * inv) / 255);
-                    dst[2] = (uint8_t)((tb * sa + dst[2] * inv) / 255);
+                    blend_tint_pixel(xx, yy, tr, tg, tb, sa);
                 }
             }
         }
@@ -584,11 +468,7 @@ static void blit_atlas_scaled(const SpriteAtlas *atlas, int frame,
             const uint8_t *src = img->px + ((size_t)(fr->y + sy) * img->w + fr->x + sx) * 4;
             int sa = (src[3] * ga) / 255;
             if (sa <= 0) continue;
-            int inv = 255 - sa;
-            uint8_t *dst = fb + ((size_t)dy * W + dx) * 4;
-            dst[0] = (uint8_t)((src[0] * ga / 255) + (dst[0] * inv) / 255);
-            dst[1] = (uint8_t)((src[1] * ga / 255) + (dst[1] * inv) / 255);
-            dst[2] = (uint8_t)((src[2] * ga / 255) + (dst[2] * inv) / 255);
+            blend_sprite_pixel(dx, dy, src, ga, sa);
         }
     }
 }
@@ -632,11 +512,7 @@ static void blit_atlas_tint_scaled(const SpriteAtlas *atlas, int frame,
                     int fade = radius > 0 ? 255 - (int)(sqrtf((float)(ox * ox + oy * oy)) * 110.0f) : 255;
                     if (fade <= 0) continue;
                     int sa = (baseA * fade) / 255;
-                    int inv = 255 - sa;
-                    uint8_t *dst = fb + ((size_t)yy * W + xx) * 4;
-                    dst[0] = (uint8_t)((tr * sa + dst[0] * inv) / 255);
-                    dst[1] = (uint8_t)((tg * sa + dst[1] * inv) / 255);
-                    dst[2] = (uint8_t)((tb * sa + dst[2] * inv) / 255);
+                    blend_tint_pixel(xx, yy, tr, tg, tb, sa);
                 }
             }
         }
@@ -927,47 +803,22 @@ static void free_sprites(void)
 }
 
 static int text_width(const char *s, int scale)
-{
-    return (int)strlen(s) * FONT_W * scale;
-}
+{ return sr_text_width(s, scale); }
 
-static void draw_glyph(int x, int y, const unsigned char *glyph,
-                       uint32_t rgb, float a, int scale)
-{
-    for (int gy = 0; gy < FONT_H; gy++) {
-        uint8_t row = glyph[gy];
-        for (int gx = 0; gx < FONT_W; gx++) {
-            if (!((row >> (7 - gx)) & 1)) continue;
-            for (int sy = 0; sy < scale; sy++)
-                for (int sx = 0; sx < scale; sx++)
-                    px_blend(x + gx * scale + sx, y + gy * scale + sy, rgb, a);
-        }
-    }
-}
-
-static void draw_text(float fx, float fy, const char *s, uint32_t rgb, float a, int scale)
-{
-    int x = (int)fx, y = (int)fy;
-    for (; *s; s++) {
-        unsigned char c = (unsigned char)*s;
-        if (c < 32 || c > 126) c = '?';
-        draw_glyph(x, y, font8x16[c - 32], rgb, a, scale);
-        x += FONT_W * scale;
-    }
-}
+static void draw_text(float x, float y, const char *s,
+                      uint32_t rgb, float a, int scale)
+{ sr_text(&canvas, x, y, s, rgb, a, scale); }
 
 static void draw_text_shadow(float x, float y, const char *s,
                              uint32_t rgb, float a, int scale)
 {
-    draw_text(x + scale, y + scale, s, 0x001018, a * 0.82f, scale);
-    draw_text(x, y, s, rgb, a, scale);
+    sr_text(&canvas, x + scale, y + scale, s, 0x001018, a * 0.82f, scale);
+    sr_text(&canvas, x, y, s, rgb, a, scale);
 }
 
 static void draw_text_center(float cx, float y, const char *s,
                              uint32_t rgb, float a, int scale)
-{
-    draw_text(cx - text_width(s, scale) * 0.5f, y, s, rgb, a, scale);
-}
+{ sr_text_center(&canvas, cx, y, s, rgb, a, scale); }
 
 static void draw_treasure_chest(float x, float y)
 {
@@ -1068,13 +919,8 @@ static void draw_background(void)
     for (int y = 0; y < water; y++) {
         float t = (float)y / fmaxf(1.0f, (float)(water - 1));
         uint32_t c = mix_rgb(0x050b12, 0x0b1c2a, t);
-        uint8_t *row = fb + (size_t)y * W * 4;
-        for (int x = 0; x < W; x++) {
-            row[x * 4 + 0] = (c >> 16) & 255;
-            row[x * 4 + 1] = (c >> 8) & 255;
-            row[x * 4 + 2] = c & 255;
-            row[x * 4 + 3] = 255;
-        }
+        uint32_t *row = canvas.px + (size_t)y * W;
+        for (int x = 0; x < W; x++) row[x] = 0xff000000u | c;
     }
 
     for (int y = water; y < ground; y++) {
@@ -1084,14 +930,14 @@ static void draw_background(void)
         int r = (c >> 16) & 255;
         int g = (c >> 8) & 255;
         int b = c & 255;
-        uint8_t *row = fb + (size_t)y * W * 4;
+        uint32_t *row = canvas.px + (size_t)y * W;
         for (int x = 0; x < W; x++) {
             float edge = fabsf((float)x / fmaxf(1.0f, W - 1.0f) - 0.5f) * 2.0f;
             float shade = 1.0f - 0.19f * edge * edge - 0.08f * t;
-            row[x * 4 + 0] = (uint8_t)(r * shade);
-            row[x * 4 + 1] = (uint8_t)(g * shade);
-            row[x * 4 + 2] = (uint8_t)(b * shade);
-            row[x * 4 + 3] = 255;
+            row[x] = 0xff000000u |
+                     (uint32_t)(uint8_t)(r * shade) << 16 |
+                     (uint32_t)(uint8_t)(g * shade) << 8 |
+                     (uint32_t)(uint8_t)(b * shade);
         }
     }
 
@@ -1114,10 +960,10 @@ static void draw_background(void)
 static void build_backdrop(void)
 {
     if (!backdrop) return;
-    uint8_t *old = fb;
-    fb = backdrop;
+    uint32_t *old = canvas.px;
+    canvas.px = backdrop;
     draw_background();
-    fb = old;
+    canvas.px = old;
     backdropVersion = G.worldVersion;
 }
 
@@ -1841,13 +1687,24 @@ static void draw_pause(void)
     draw_text_center(W * 0.5f, py + 84.0f * s, "P resume    H help    Q quit", 0xdbeafe, 1.0f, 1);
 }
 
+static void repack_frame(void)
+{
+    for (size_t i = 0, count = (size_t)W * H; i < count; i++) {
+        uint32_t pixel = canvas.px[i];
+        fb[i * 4 + 0] = (uint8_t)(pixel >> 16);
+        fb[i * 4 + 1] = (uint8_t)(pixel >> 8);
+        fb[i * 4 + 2] = (uint8_t)pixel;
+        fb[i * 4 + 3] = (uint8_t)(pixel >> 24);
+    }
+}
+
 void render_frame(void)
 {
-    if (!fb) return;
+    if (!canvas.px || !fb) return;
     if (!backdrop || backdropVersion != G.worldVersion)
         build_backdrop();
     if (backdrop)
-        memcpy(fb, backdrop, (size_t)W * H * 4);
+        memcpy(canvas.px, backdrop, (size_t)W * H * sizeof *backdrop);
     else
         draw_background();
     draw_caustics();
@@ -1867,4 +1724,5 @@ void render_frame(void)
     draw_pause();
     if (G.showHelp)
         draw_help();
+    repack_frame();
 }

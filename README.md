@@ -67,9 +67,13 @@ make test
 Generated image data is embedded in `src/embedded_assets.h`, so the raw image
 working files are not required to build or run the project.
 
+Framebuffer presentation, common raster primitives, and audio mixing use
+vendored `kitty-framebuffer`, `soft-raster`, and `pcm-mixer` sources under
+`third_party/`.
+
 Audio assets live under `assets/audio/`. The default ambience is a quiet
-CC0-derived water loop played through `ffplay` in interactive mode; see
+CC0-derived PCM WAV loop played through the shared mixer; see
 [`assets/audio/README.md`](assets/audio/README.md) for its source and licence.
 Set `KILIX_FISHTANK_NO_AUDIO=1` to disable startup audio,
 `KILIX_FISHTANK_AUDIO_VOLUME=0..100` to adjust playback volume, or
-`KILIX_FISHTANK_AUDIO=/path/to/file.webm` to use another loop.
+`KILIX_FISHTANK_AUDIO=/path/to/file.wav` to use another mono 44.1 kHz PCM16 loop.

@@ -1,14 +1,16 @@
-/* Optional ambience playback through ffplay. */
+/* Optional looping ambience through the shared PCM mixer. */
 #include "fishtank.h"
-#include <signal.h>
-#include <stdbool.h>
+#include "pcm_mixer.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
-static pid_t audioPid = -1;
+static pcmmix mixer;
+static bool mixer_started;
+static int16_t *ambience_data;
+static size_t ambience_frames;
 
 static bool env_is_off(const char *value)
 {
@@ -18,7 +20,8 @@ static bool env_is_off(const char *value)
 
 static bool audio_disabled(void)
 {
-    return getenv("KILIX_FISHTANK_NO_AUDIO") || env_is_off(getenv("KILIX_FISHTANK_AUDIO"));
+    return getenv("KILIX_FISHTANK_NO_AUDIO") ||
+           env_is_off(getenv("KILIX_FISHTANK_AUDIO"));
 }
 
 static bool readable_file(const char *path)
@@ -26,17 +29,17 @@ static bool readable_file(const char *path)
     return path && *path && access(path, R_OK) == 0;
 }
 
-static bool try_path(char *out, size_t outSize, const char *path)
+static bool try_path(char *out, size_t out_size, const char *path)
 {
     if (!readable_file(path)) return false;
-    snprintf(out, outSize, "%s", path);
+    snprintf(out, out_size, "%s", path);
     return true;
 }
 
-static bool executable_dir(const char *argv0, char *out, size_t outSize)
+static bool executable_dir(const char *argv0, char *out, size_t out_size)
 {
     if (!argv0 || !strchr(argv0, '/')) return false;
-    snprintf(out, outSize, "%s", argv0);
+    snprintf(out, out_size, "%s", argv0);
     char *slash = strrchr(out, '/');
     if (!slash) return false;
     if (slash == out) slash[1] = '\0';
@@ -44,106 +47,77 @@ static bool executable_dir(const char *argv0, char *out, size_t outSize)
     return true;
 }
 
-static bool find_audio_asset(const char *argv0, char *out, size_t outSize)
+static bool find_audio_asset(const char *argv0, char *out, size_t out_size)
 {
-    const char *explicitPath = getenv("KILIX_FISHTANK_AUDIO");
-    if (explicitPath && *explicitPath && !env_is_off(explicitPath))
-        return try_path(out, outSize, explicitPath);
+    const char *explicit_path = getenv("KILIX_FISHTANK_AUDIO");
+    if (explicit_path && *explicit_path && !env_is_off(explicit_path) &&
+        strstr(explicit_path, ".wav"))
+        return try_path(out, out_size, explicit_path);
+    if (try_path(out, out_size, "assets/audio/fishtank_ambience.wav"))
+        return true;
 
-    if (try_path(out, outSize, "assets/audio/fishtank_ambience.webm")) return true;
-    if (try_path(out, outSize, "assets/audio/fishtank_ambience.wav")) return true;
-
-    char dir[1024];
+    char directory[1024];
     char candidate[1400];
-    if (executable_dir(argv0, dir, sizeof dir)) {
-        snprintf(candidate, sizeof candidate, "%s/assets/audio/fishtank_ambience.webm", dir);
-        if (try_path(out, outSize, candidate)) return true;
-        snprintf(candidate, sizeof candidate, "%s/assets/audio/fishtank_ambience.wav", dir);
-        if (try_path(out, outSize, candidate)) return true;
-        snprintf(candidate, sizeof candidate, "%s/../assets/audio/fishtank_ambience.webm", dir);
-        if (try_path(out, outSize, candidate)) return true;
-        snprintf(candidate, sizeof candidate, "%s/../assets/audio/fishtank_ambience.wav", dir);
-        if (try_path(out, outSize, candidate)) return true;
+    if (executable_dir(argv0, directory, sizeof directory)) {
+        snprintf(candidate, sizeof candidate,
+                 "%s/assets/audio/fishtank_ambience.wav", directory);
+        if (try_path(out, out_size, candidate)) return true;
+        snprintf(candidate, sizeof candidate,
+                 "%s/../assets/audio/fishtank_ambience.wav", directory);
+        if (try_path(out, out_size, candidate)) return true;
     }
-
     return false;
 }
 
-static void reap_audio(void)
+static float audio_volume(void)
 {
-    if (audioPid <= 0) return;
-    int status;
-    pid_t got = waitpid(audioPid, &status, WNOHANG);
-    if (got == audioPid) audioPid = -1;
-}
-
-static int audio_volume(void)
-{
-    const char *env = getenv("KILIX_FISHTANK_AUDIO_VOLUME");
-    if (!env || !*env) return 18;
-    int volume = atoi(env);
+    const char *value = getenv("KILIX_FISHTANK_AUDIO_VOLUME");
+    int volume = value && *value ? atoi(value) : 18;
     if (volume < 0) volume = 0;
     if (volume > 100) volume = 100;
-    return volume;
+    return volume / 100.0f;
 }
 
 void audio_start(const char *argv0)
 {
-    reap_audio();
-    if (audioPid > 0 || audio_disabled()) return;
-
+    pcmmix_options options;
     char asset[1400];
-    if (!find_audio_asset(argv0, asset, sizeof asset)) return;
+    char error[256];
 
-    pid_t pid = fork();
-    if (pid < 0) return;
-    if (pid == 0) {
-        char volumeArg[16];
-        snprintf(volumeArg, sizeof volumeArg, "%d", audio_volume());
-
-        setsid();
-        (void)freopen("/dev/null", "r", stdin);
-        (void)freopen("/dev/null", "w", stdout);
-        (void)freopen("/dev/null", "w", stderr);
-
-        execlp("ffplay", "ffplay",
-               "-hide_banner", "-nostats", "-loglevel", "quiet",
-               "-nodisp", "-autoexit",
-               "-volume", volumeArg,
-               "-loop", "0",
-               asset,
-               (char *)NULL);
-        _exit(127);
+    if (mixer_started || audio_disabled() ||
+        !find_audio_asset(argv0, asset, sizeof asset))
+        return;
+    ambience_data = pcmmix_wav_load(asset, &ambience_frames,
+                                     error, sizeof error);
+    if (!ambience_data) return;
+    pcmmix_options_init(&options);
+    if (!pcmmix_start(&mixer, &options)) {
+        pcmmix_wav_free(ambience_data);
+        ambience_data = NULL;
+        ambience_frames = 0;
+        return;
     }
-
-    audioPid = pid;
+    mixer_started = true;
+    pcmmix_sample ambience = {ambience_data, ambience_frames};
+    (void)pcmmix_loop(&mixer, &ambience, audio_volume(), 1.0f);
 }
 
 void audio_stop(void)
 {
-    reap_audio();
-    if (audioPid <= 0) return;
-    pid_t pid = audioPid;
-    audioPid = -1;
-    kill(pid, SIGTERM);
-    for (int i = 0; i < 20; i++) {
-        int status;
-        pid_t got = waitpid(pid, &status, WNOHANG);
-        if (got == pid || got < 0) return;
-        usleep(25000);
-    }
-    kill(pid, SIGKILL);
-    waitpid(pid, NULL, 0);
+    if (mixer_started) pcmmix_stop(&mixer);
+    mixer_started = false;
+    pcmmix_wav_free(ambience_data);
+    ambience_data = NULL;
+    ambience_frames = 0;
 }
 
 void audio_emergency_stop(void)
 {
-    if (audioPid > 0) kill(audioPid, SIGTERM);
+    /* The fatal-signal caller exits immediately; the sink observes EOF. */
 }
 
 void audio_toggle(const char *argv0)
 {
-    reap_audio();
-    if (audioPid > 0) audio_stop();
+    if (mixer_started) audio_stop();
     else audio_start(argv0);
 }
