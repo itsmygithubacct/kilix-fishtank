@@ -233,10 +233,13 @@ static void award_food_score(const Fish *f)
     G.level = 1 + G.score / 500;
     G.scorePulse = 0.38f;
     G.frenzyMeter = clampf(G.frenzyMeter + 7.5f + G.combo * 0.55f, 0.0f, 100.0f);
+    audio_play(AUDIO_FISH_BITE, 0.22f,
+               f ? clampf(1.18f - f->size * 0.06f, 0.86f, 1.18f) : 1.0f);
     if (G.frenzyMeter >= 100.0f) {
         G.frenzyMeter = 0.0f;
         G.frenzyTimer = 7.5f;
         G.scorePulse = 0.75f;
+        audio_play(AUDIO_FRENZY, 0.62f, 1.0f);
     }
 }
 
@@ -444,6 +447,8 @@ void game_add_food_at(float x, float y, int amount)
         }
     }
     G.feedPulse = 0.55f;
+    audio_play(AUDIO_FEED_SPLASH, 0.34f,
+               0.94f + 0.03f * (float)(amount > 4 ? 4 : amount));
 }
 
 static void clear_sharks(void)
@@ -877,6 +882,10 @@ static void shark_consume_fish(Shark *sh, Fish *f, float s)
     sh->attackTimer = 1.18f;
     sh->chargeTimer = 0.34f;
     start_shark_bite(sh, f, s);
+    /* Presentation must not consume gameplay RNG; derive pitch from the
+     * victim so audio cannot change the deterministic simulation. */
+    audio_play(AUDIO_SHARK_BITE, 0.76f,
+               clampf(1.04f - f->size * 0.04f, 0.90f, 1.02f));
     sparkle(f->x, f->y, pal->fin, 12, 74.0f * s);
     for (int b = 0; b < 9; b++)
         add_bubble_at(f->x + frandr(-9, 9) * s, f->y + frandr(-5, 6) * s,
@@ -1401,6 +1410,8 @@ static void fishing_land(Ship *ship, int idx)
     G.frenzyMeter = clampf(G.frenzyMeter + 8.0f, 0.0f, 100.0f);
     sparkle(ship->hookX, ship->hookY, pal->body, 18, 66.0f * s);
     water_splash(ship->hookX, sim_water_surface_y(ship->hookX), 0xdffbff, 14, 62.0f * s);
+    audio_play(AUDIO_CATCH_SPLASH, 0.58f,
+               clampf(1.10f - f->size * 0.04f, 0.88f, 1.08f));
     f->active = false;
     reset_fishing_state(ship);
     ship->hookTargetY = sim_water_surface_y(ship->x) + 54.0f * s;

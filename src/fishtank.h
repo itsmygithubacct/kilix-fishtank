@@ -236,10 +236,21 @@ void render_frame(void);
 uint8_t *render_fb(void);
 
 /* ---------- audio.c ---------- */
+typedef enum {
+    AUDIO_FEED_SPLASH = 0,
+    AUDIO_FISH_BITE,
+    AUDIO_SHARK_BITE,
+    AUDIO_FRENZY,
+    AUDIO_CATCH_SPLASH,
+    AUDIO_EVENT_COUNT
+} audio_event;
+
 void audio_start(const char *argv0);
 void audio_toggle(const char *argv0);
+void audio_play(audio_event event, float volume, float pitch);
 void audio_stop(void);
 void audio_emergency_stop(void);
+bool audio_validate_assets(const char *argv0);
 
 /* ---------- term.c ---------- */
 bool term_init(int *outW, int *outH);

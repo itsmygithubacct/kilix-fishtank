@@ -1,0 +1,21 @@
+{
+  "generator": "ui_game_state_generator",
+  "command": "pack",
+  "pack": "kilix-fishtank",
+  "format": "mono 44100 Hz signed 16-bit PCM WAV",
+  "source_audio": "none; deterministic procedural synthesis",
+  "artifacts": [
+    {
+      "file": "frenzy.wav",
+      "cue": "checkpoint",
+      "style": "arcade",
+      "seed": 20260715,
+      "variation": 1,
+      "duration_seconds": 0.173288,
+      "peak_dbfs": -10.0,
+      "rms_dbfs": -14.258,
+      "sha256": "2d2ca8cb2c4cb8adcbba05df25705fc46941911889243a8645aa2bcc721ce315",
+      "sources": []
+    }
+  ]
+}

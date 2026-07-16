@@ -19,8 +19,9 @@ uses a lightweight 1D wave simulation for feeding ripples, boat wake, and
 shark disturbances. Fish and sharks ease through edge-on turn poses instead
 of snapping direction. Multiple boats fight with arcing cannon shots until one
 remains; with exactly one boat, `M` toggles a small fishing mode from that boat.
-Interactive runs also start a quiet CC0-derived aquarium ambience loop
-through `ffplay` when available.
+Interactive runs also start a quiet CC0-derived aquarium ambience loop through
+the in-process PCM mixer. Feeding, fish bites, shark bites, frenzy, and landed
+catches have event cues from the same local CC0/procedural asset pipeline.
 
 ![Kilix Fishtank shark turn](images/readme-shark-turn.png)
 
@@ -59,6 +60,7 @@ Kitty-protocol terminals such as kitty, Ghostty, WezTerm, and kilix.
 make test
 ./kilix-fishtank --render-test 42
 ./kilix-fishtank --selftest 1337 7200
+./kilix-fishtank --sound-test
 ```
 
 `--render-test` writes `render_initial.ppm`, `render_attack.ppm`, and
@@ -71,9 +73,9 @@ Framebuffer presentation, common raster primitives, and audio mixing use
 vendored `kitty-framebuffer`, `soft-raster`, and `pcm-mixer` sources under
 `third_party/`.
 
-Audio assets live under `assets/audio/`. The default ambience is a quiet
-CC0-derived PCM WAV loop played through the shared mixer; see
-[`assets/audio/README.md`](assets/audio/README.md) for its source and licence.
+Audio assets live under `assets/audio/`. The quiet ambience loop and five event
+cues are PCM WAV files played through the shared mixer; see
+[`assets/audio/README.md`](assets/audio/README.md) for sources and licences.
 Set `KILIX_FISHTANK_NO_AUDIO=1` to disable startup audio,
 `KILIX_FISHTANK_AUDIO_VOLUME=0..100` to adjust playback volume, or
 `KILIX_FISHTANK_AUDIO=/path/to/file.wav` to use another mono 44.1 kHz PCM16 loop.

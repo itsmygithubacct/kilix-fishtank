@@ -48,6 +48,7 @@ src/vendor_soft_raster.o: $(SOFT_RASTER_DIR)/src/soft_raster.c \
 test: $(BIN)
 	./$(BIN) --selftest 1337 7200
 	./$(BIN) --render-test 42
+	./$(BIN) --sound-test
 
 clean:
 	rm -f $(OBJ) $(BIN) render_*.ppm render_*.png

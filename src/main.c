@@ -250,6 +250,9 @@ int main(int argc, char **argv)
         unsigned seed = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 1337;
         return render_test(seed);
     }
+    if (argc > 1 && !strcmp(argv[1], "--sound-test")) {
+        return audio_validate_assets(argv[0]) ? 0 : 1;
+    }
     if (argc > 1 && !strcmp(argv[1], "--version")) {
         printf("kilix-fishtank 0.1.0\n");
         return 0;

@@ -1,17 +1,20 @@
 # Fishtank Audio Assets
 
-`fishtank_ambience.webm` is the default quiet aquarium loop used by
-`kilix-fishtank` in interactive mode. The `.wav` file is the same loop in an
-uncompressed format for inspection or replacement. Both are a seamless
-45-second loop: an intermittent bubbler — clusters of bubbles arriving every few
-seconds over faint water, rather than a continuous stream, which is what a quiet
-tank sitting in the corner actually sounds like.
+`fishtank_ambience.wav` is the default quiet aquarium loop used by
+`kilix-fishtank` in interactive mode. It is a seamless 45-second loop: an
+intermittent bubbler over faint water. `fishtank_ambience.webm` is retained as a
+compact reference copy, but the runtime only loads mono 44.1 kHz PCM16 WAV.
+
+The `events/` directory contains short cues for feeding, fish bites, shark
+bites, frenzy, and landed catches. They play through the same in-process mixer,
+so the game does not launch an external media player.
 
 ## Provenance
 
-The loop is derived from Creative Commons Zero (CC0) source recordings, layered
-and looped by a deterministic procedural generator (fixed seed, so the render is
-reproducible). No rights-restricted audio is used.
+The ambience and water event cues are derived from Creative Commons Zero (CC0)
+source recordings, layered and rendered by deterministic procedural generators.
+The bite and frenzy cues are generated procedurally. No rights-restricted audio
+is used.
 
 - **Source:** rubberduck, *40 CC0 water / splash / slime SFX* —
   <https://opengameart.org/content/40-cc0-water-splash-slime-sfx>
@@ -23,11 +26,14 @@ reproducible). No rights-restricted audio is used.
 Because the source is CC0, this file carries no attribution obligation; the
 credit above is recorded for provenance rather than as a licence requirement.
 
+Exact generator settings and output hashes are recorded in
+`provenance/water-events.json`, `provenance/creature-events.json`, and
+`provenance/ui-events.json`.
+
 ## Playback
 
 ```sh
-ffplay -hide_banner -nostats -loglevel quiet -nodisp -autoexit \
-  -volume 18 -loop 0 assets/audio/fishtank_ambience.webm
+./kilix-fishtank --sound-test
 ```
 
 ## Runtime controls
@@ -35,5 +41,5 @@ ffplay -hide_banner -nostats -loglevel quiet -nodisp -autoexit \
 ```sh
 KILIX_FISHTANK_NO_AUDIO=1 ./kilix-fishtank
 KILIX_FISHTANK_AUDIO_VOLUME=12 ./kilix-fishtank
-KILIX_FISHTANK_AUDIO=/path/to/loop.webm ./kilix-fishtank
+KILIX_FISHTANK_AUDIO=/path/to/mono-44100-pcm16-loop.wav ./kilix-fishtank
 ```
