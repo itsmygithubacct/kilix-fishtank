@@ -33,11 +33,12 @@ static void update_mouse_geometry(int width, int height)
 bool term_init(int *outW, int *outH)
 {
     kittyfb_options options;
-    static const char mouse_on[] = "\x1b[?1003h\x1b[?1006h";
 
     kittyfb_session_init(&framebuffer);
     kittyfb_options_init(&options);
     options.install_winch_handler = false;
+    options.enter_sequence = "\x1b[?1003h\x1b[?1006h";
+    options.leave_sequence = "\x1b[?1003l\x1b[?1000l\x1b[?1006l";
     if (kittyfb_start(&framebuffer, STDIN_FILENO, STDOUT_FILENO,
                       &options) != 0)
         return false;
@@ -46,7 +47,6 @@ bool term_init(int *outW, int *outH)
     *outW = kittyfb_width(&framebuffer);
     *outH = kittyfb_height(&framebuffer);
     update_mouse_geometry(*outW, *outH);
-    (void)write(STDOUT_FILENO, mouse_on, sizeof mouse_on - 1);
     return true;
 }
 
@@ -64,19 +64,15 @@ static bool claim_shutdown(void)
 
 void term_shutdown(void)
 {
-    static const char mouse_off[] = "\x1b[?1003l\x1b[?1000l\x1b[?1006l";
     if (!claim_shutdown()) return;
     kittyfb_stop(&framebuffer);
     framebuffer_active = false;
-    (void)write(STDOUT_FILENO, mouse_off, sizeof mouse_off - 1);
 }
 
 void term_emergency_restore(void)
 {
-    static const char mouse_off[] = "\x1b[?1003l\x1b[?1000l\x1b[?1006l";
     if (!claim_shutdown()) return;
     kittyfb_emergency_restore(&framebuffer);
-    (void)write(STDOUT_FILENO, mouse_off, sizeof mouse_off - 1);
 }
 
 static int parse_sgr_mouse(void)
