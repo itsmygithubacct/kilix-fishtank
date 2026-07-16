@@ -19,7 +19,7 @@ uses a lightweight 1D wave simulation for feeding ripples, boat wake, and
 shark disturbances. Fish and sharks ease through edge-on turn poses instead
 of snapping direction. Multiple boats fight with arcing cannon shots until one
 remains; with exactly one boat, `M` toggles a small fishing mode from that boat.
-Interactive runs also start a quiet Strudel-generated aquarium ambience loop
+Interactive runs also start a quiet CC0-derived aquarium ambience loop
 through `ffplay` when available.
 
 ![Kilix Fishtank shark turn](images/readme-shark-turn.png)
@@ -68,7 +68,8 @@ Generated image data is embedded in `src/embedded_assets.h`, so the raw image
 working files are not required to build or run the project.
 
 Audio assets live under `assets/audio/`. The default ambience is a quiet
-Strudel-generated water loop played through `ffplay` in interactive mode.
+CC0-derived water loop played through `ffplay` in interactive mode; see
+[`assets/audio/README.md`](assets/audio/README.md) for its source and licence.
 Set `KILIX_FISHTANK_NO_AUDIO=1` to disable startup audio,
 `KILIX_FISHTANK_AUDIO_VOLUME=0..100` to adjust playback volume, or
 `KILIX_FISHTANK_AUDIO=/path/to/file.webm` to use another loop.

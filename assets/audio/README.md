@@ -2,16 +2,35 @@
 
 `fishtank_ambience.webm` is the default quiet aquarium loop used by
 `kilix-fishtank` in interactive mode. The `.wav` file is the same loop in an
-uncompressed format for inspection or replacement.
+uncompressed format for inspection or replacement. Both are a seamless
+45-second loop: an intermittent bubbler — clusters of bubbles arriving every few
+seconds over faint water, rather than a continuous stream, which is what a quiet
+tank sitting in the corner actually sounds like.
 
-Playback:
+## Provenance
+
+The loop is derived from Creative Commons Zero (CC0) source recordings, layered
+and looped by a deterministic procedural generator (fixed seed, so the render is
+reproducible). No rights-restricted audio is used.
+
+- **Source:** rubberduck, *40 CC0 water / splash / slime SFX* —
+  <https://opengameart.org/content/40-cc0-water-splash-slime-sfx>
+- **Licence:** CC0 1.0 (public domain dedication), read from the source page.
+- **Layers:** bubble recordings from that pack, placed in intermittent bursts,
+  over a faint low-passed water bed from the same pack. The loop is seamless by
+  construction — bursts that reach the end wrap to the start.
+
+Because the source is CC0, this file carries no attribution obligation; the
+credit above is recorded for provenance rather than as a licence requirement.
+
+## Playback
 
 ```sh
 ffplay -hide_banner -nostats -loglevel quiet -nodisp -autoexit \
   -volume 18 -loop 0 assets/audio/fishtank_ambience.webm
 ```
 
-Runtime controls:
+## Runtime controls
 
 ```sh
 KILIX_FISHTANK_NO_AUDIO=1 ./kilix-fishtank
