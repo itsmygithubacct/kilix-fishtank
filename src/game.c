@@ -381,6 +381,7 @@ static void add_shark(void)
             sh->vx = sh->direction * 44.0f * s;
             sh->lastX = sh->x;
             sh->lastY = sh->y;
+            audio_play(AUDIO_SHARK_ALERT, 0.42f, 1.0f);
             return;
         }
     }
@@ -1389,6 +1390,8 @@ static void fishing_escape(Ship *ship, int idx, bool snapped)
         sparkle(ship->hookX, ship->hookY, 0xe0faff, 7, 38.0f * s);
         G.dangerPulse = fmaxf(G.dangerPulse, 0.20f);
     }
+    audio_play(snapped ? AUDIO_LINE_SNAP : AUDIO_FISH_ESCAPE,
+               snapped ? 0.48f : 0.34f, 1.0f);
     reset_fishing_state(ship);
     ship->fishingPulse = 0.42f;
 }
@@ -1439,6 +1442,7 @@ static void fishing_reel_action(Ship *ship)
         G.fish[ship->hookedFish].attackX = ship->hookX;
         G.fish[ship->hookedFish].attackY = ship->hookY;
         sparkle(ship->hookX, ship->hookY, 0xfff1a8, 8, 42.0f * s);
+        audio_play(AUDIO_HOOK_SET, 0.42f, 1.0f);
         return;
     }
 
@@ -1560,6 +1564,7 @@ static void update_ship_fishing(Ship *ship, float dt)
                 f->attackTimer = fmaxf(f->attackTimer, 0.32f);
                 f->attackX = ship->hookX;
                 f->attackY = ship->hookY;
+                audio_play(AUDIO_HOOK_BITE, 0.34f, 1.0f);
             }
         }
     }

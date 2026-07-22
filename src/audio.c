@@ -13,6 +13,11 @@ static const char *const event_files[AUDIO_EVENT_COUNT] = {
     [AUDIO_SHARK_BITE] = "events/shark_bite.wav",
     [AUDIO_FRENZY] = "events/frenzy.wav",
     [AUDIO_CATCH_SPLASH] = "events/catch_splash.wav",
+    [AUDIO_HOOK_BITE] = "events/hook_bite.wav",
+    [AUDIO_HOOK_SET] = "events/hook_set.wav",
+    [AUDIO_FISH_ESCAPE] = "events/fish_escape.wav",
+    [AUDIO_LINE_SNAP] = "events/line_snap.wav",
+    [AUDIO_SHARK_ALERT] = "events/shark_alert.wav",
 };
 
 static pcmmix mixer;

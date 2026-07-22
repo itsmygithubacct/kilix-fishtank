@@ -73,7 +73,7 @@ Framebuffer presentation, common raster primitives, and audio mixing use
 vendored `kitty-framebuffer`, `soft-raster`, and `pcm-mixer` sources under
 `third_party/`.
 
-Audio assets live under `assets/audio/`. The quiet ambience loop and five event
+Audio assets live under `assets/audio/`. The quiet ambience loop and ten event
 cues are PCM WAV files played through the shared mixer; see
 [`assets/audio/README.md`](assets/audio/README.md) for sources and licences.
 Set `KILIX_FISHTANK_NO_AUDIO=1` to disable startup audio,
